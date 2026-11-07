@@ -553,90 +553,104 @@ jobs:
             done
           fi
            
-      - name: 构建内核
-        run: |
-          WORKDIR="$(pwd)"
-          export PATH="/usr/lib/ccache:$PATH"
-          export PATH="$WORKDIR/kernel_workspace/clang20/bin:$PATH"
-          export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
-          CLANG_DIR="$WORKDIR/kernel_workspace/clang20/bin"
-          CLANG_VERSION="$($CLANG_DIR/clang --version | head -n 1)"
-          LLD_VERSION="$($CLANG_DIR/ld.lld --version | head -n 1)"
-          echo "编译器信息:"
-          echo "Clang版本: $CLANG_VERSION"
-          echo "LLD版本: $LLD_VERSION"
-          pahole_version=$(pahole --version 2>/dev/null | head -n1); [ -z "$pahole_version" ] && echo "pahole版本：未安装" || echo "pahole版本：$pahole_version"
-          
-          export CCACHE_LOGFILE="${{ github.workspace }}/kernel_workspace/ccache.log"
-          export CCACHE_COMPILERCHECK="none"
-          export CCACHE_BASEDIR="${{ github.workspace }}"
-          export CCACHE_NOHASHDIR="true"
-          export CCACHE_NOHARDLINK="true"
-          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
-          export CCACHE_MAXSIZE="3G"
-          export CCACHE_IS_KERNEL_COMPILING="true"
-          echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
-          
-          cd kernel_workspace/common
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so
-          chmod 777 ./*.so
-          export FAKESTAT="2025-05-25 12:00:00"
-          export FAKETIME="@2025-05-25 13:00:00"
-          echo "FAKESTAT=$FAKESTAT" >> $GITHUB_ENV
-          echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
-          SO_DIR=$(pwd)
-          export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
-          #创建 CC (编译器) 包装器
-          echo '#!/bin/bash' > cc-wrapper
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
-          echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
-          echo 'ccache clang "$@"' >> cc-wrapper
-          #创建 LD (链接器) 包装器
-          echo '#!/bin/bash' > ld-wrapper
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
-          echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
-          echo 'ld.lld "$@"' >> ld-wrapper
-          
-          # 测试时间劫持测试是否正常工作
-          echo "--- [Wrapper Test] 正在创建通用的时间劫持测试脚本 ---"
-          echo '#!/bin/bash' > test-wrapper.sh
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> test-wrapper.sh
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> test-wrapper.sh
-          echo 'export FAKETIME="'$FAKETIME'"' >> test-wrapper.sh
-          echo 'echo ">>> Wrapper 内部环境检查完毕."' >> test-wrapper.sh
-          echo 'exec "$@"' >> test-wrapper.sh # 执行所有传入的参数
-          chmod +x test-wrapper.sh
-          echo "--- [Wrapper Test] 正在测试 (date) 命令 ---"
-          ./test-wrapper.sh date
-          echo "--- [Wrapper Test] 正在测试 (stat) 命令 ---"
-          ./test-wrapper.sh stat ./Makefile
-          echo "--- [Wrapper Test] 测试完毕 ---"
-          chmod +x cc-wrapper ld-wrapper
-          echo "--- 编译前环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
-          echo "--- 编译前环境文件时间戳: ---"
-          LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
-          
-          #在构建内核的同时清除不必要的.NET, Android NDK, Haskell, CodeQL运行库，清理空间且不阻塞后续步骤运行
-          sudo rm -rf /usr/share/dotnet &
-          sudo rm -rf /usr/local/lib/android &
-          sudo rm -rf /opt/ghc &
-          sudo rm -rf /opt/hostedtoolcache/CodeQL &
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig &&
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
-          
-          # 编译后时间劫持二次校验
-          echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
-          echo "--- 编译后环境文件时间戳: ---"
-          LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
-          echo "内核编译完成！"
-          echo "ccache状态："
-          ccache -s
-          echo "编译后空间:"
-          df -h
+- name: 构建内核
+  run: |
+    WORKDIR="$(pwd)"
+    export PATH="/usr/lib/ccache:$PATH"
+    export PATH="$WORKDIR/kernel_workspace/clang20/bin:$PATH"
+    export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
+    CLANG_DIR="$WORKDIR/kernel_workspace/clang20/bin"
+    CLANG_VERSION="$($CLANG_DIR/clang --version | head -n 1)"
+    LLD_VERSION="$($CLANG_DIR/ld.lld --version | head -n 1)"
+    echo "编译器信息:"
+    echo "Clang版本: $CLANG_VERSION"
+    echo "LLD版本: $LLD_VERSION"
+    pahole_version=$(pahole --version 2>/dev/null | head -n1); [ -z "$pahole_version" ] && echo "pahole版本：未安装" || echo "pahole版本：$pahole_version"
 
+    export CCACHE_LOGFILE="${{ github.workspace }}/kernel_workspace/ccache.log"
+    export CCACHE_COMPILERCHECK="none"
+    export CCACHE_BASEDIR="${{ github.workspace }}"
+    export CCACHE_NOHASHDIR="true"
+    export CCACHE_NOHARDLINK="true"
+    export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+    export CCACHE_MAXSIZE="3G"
+    export CCACHE_IS_KERNEL_COMPILING="true"
+    echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
+
+    cd kernel_workspace/common
+
+    # ★★★ 修复 pahole 版本过新导致的 enum64 BTF 兼容问题 ★★★
+    echo "=== 检查 pahole 兼容性并打补丁 ==="
+    if [ -f scripts/pahole-flags.sh ] && ! grep -q "skip_encoding_btf_enum64" scripts/pahole-flags.sh; then
+      echo "--- 为 scripts/pahole-flags.sh 添加 --skip_encoding_btf_enum64 ---"
+      # 优先按版本判断块追加
+      sed -i '/pahole_ver.*-ge.*124/a\	extra_paholeopt="${extra_paholeopt} --skip_encoding_btf_enum64"' scripts/pahole-flags.sh
+      # 若版本判断块不存在，则直接插到 echo 之前（兼容老内核结构）
+      if ! grep -q "skip_encoding_btf_enum64" scripts/pahole-flags.sh; then
+        sed -i '/^echo .*extra_paholeopt/i\extra_paholeopt="${extra_paholeopt} --skip_encoding_btf_enum64"' scripts/pahole-flags.sh
+      fi
+      echo "--- 补丁后关键部分: ---"
+      grep -n "skip_encoding_btf_enum64" scripts/pahole-flags.sh || true
+    else
+      echo "skip_encoding_btf_enum64 已存在或 pahole-flags.sh 不存在，跳过补丁"
+    fi
+    # 清除上一次编译残留的损坏 BTF 中间产物
+    rm -f out/.btf.vmlinux.bin.o out/.tmp_vmlinux.btf out/vmlinux out/.tmp_vmlinux.kallsyms* out/vmlinux.o
+    # ★★★ pahole 补丁结束 ★★★
+
+    wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so
+    wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so
+    chmod 777 ./*.so
+    export FAKESTAT="2025-05-25 12:00:00"
+    export FAKETIME="@2025-05-25 13:00:00"
+    echo "FAKESTAT=$FAKESTAT" >> $GITHUB_ENV
+    echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
+    SO_DIR=$(pwd)
+    export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
+    echo '#!/bin/bash' > cc-wrapper
+    echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
+    echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
+    echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
+    echo 'ccache clang "$@"' >> cc-wrapper
+    echo '#!/bin/bash' > ld-wrapper
+    echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
+    echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
+    echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
+    echo 'ld.lld "$@"' >> ld-wrapper
+
+    echo "--- [Wrapper Test] 正在创建通用的时间劫持测试脚本 ---"
+    echo '#!/bin/bash' > test-wrapper.sh
+    echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> test-wrapper.sh
+    echo 'export FAKESTAT="'$FAKESTAT'"' >> test-wrapper.sh
+    echo 'export FAKETIME="'$FAKETIME'"' >> test-wrapper.sh
+    echo 'echo ">>> Wrapper 内部环境检查完毕."' >> test-wrapper.sh
+    echo 'exec "$@"' >> test-wrapper.sh
+    chmod +x test-wrapper.sh
+    echo "--- [Wrapper Test] 正在测试 (date) 命令 ---"
+    ./test-wrapper.sh date
+    echo "--- [Wrapper Test] 正在测试 (stat) 命令 ---"
+    ./test-wrapper.sh stat ./Makefile
+    echo "--- [Wrapper Test] 测试完毕 ---"
+    chmod +x cc-wrapper ld-wrapper
+    echo "--- 编译前环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
+    echo "--- 编译前环境文件时间戳: ---"
+    LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
+
+    sudo rm -rf /usr/share/dotnet &
+    sudo rm -rf /usr/local/lib/android &
+    sudo rm -rf /opt/ghc &
+    sudo rm -rf /opt/hostedtoolcache/CodeQL &
+    make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig &&
+    make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
+
+    echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
+    echo "--- 编译后环境文件时间戳: ---"
+    LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
+    echo "内核编译完成！"
+    echo "ccache状态："
+    ccache -s
+    echo "编译后空间:"
+    df -h
       - name: 保存新的 ccache 缓存
         if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
